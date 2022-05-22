@@ -1,0 +1,6 @@
+*.stl
+*.geotiff
+*.swp
+.idea
+.DS_Store
+

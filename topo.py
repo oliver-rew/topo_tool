@@ -1,5 +1,8 @@
 import argparse
 import logging
+import humanize
+
+from stl import mesh
 
 from matplotlib import pyplot
 import numpy as np
@@ -69,6 +72,7 @@ def reproject_ds(src, dest_crs):
     return dst
 
 
+# TODO there has got to be a GEOJson lib I can use
 def crop_corners_to_geojson(crop):
     # 'crop' in format [lower left lat, lower left long, upper right lat, upper right long]
     lower_left_lat = crop[0]
@@ -101,98 +105,6 @@ def crop(src, crop_args):
     m = MemoryFile().open(**meta)
     m.write(out_image)
     return m
-
-
-#
-# NormalVector
-#
-# Calculate the normal vector of a triangle. (Unit vector perpendicular to
-# triangle surface, pointing away from the "outer" face of the surface.)
-# Computed using 32-bit float operations for consistency with other tools.
-#
-# Parameters:
-#  triangle vertices (nested x y z tuples)
-#
-# Returns:
-#  normal vector (x y z tuple)
-#
-def NormalVector(t):
-    (ax, ay, az) = t[0]
-    (bx, by, bz) = t[1]
-    (cx, cy, cz) = t[2]
-
-    # first edge
-    e1x = np.float32(ax) - np.float32(bx)
-    e1y = np.float32(ay) - np.float32(by)
-    e1z = np.float32(az) - np.float32(bz)
-
-    # second edge
-    e2x = np.float32(bx) - np.float32(cx)
-    e2y = np.float32(by) - np.float32(cy)
-    e2z = np.float32(bz) - np.float32(cz)
-
-    # cross product
-    cpx = np.float32(e1y * e2z) - np.float32(e1z * e2y)
-    cpy = np.float32(e1z * e2x) - np.float32(e1x * e2z)
-    cpz = np.float32(e1x * e2y) - np.float32(e1y * e2x)
-
-    # return cross product vector normalized to unit length
-    mag = np.sqrt(np.power(cpx, 2) + np.power(cpy, 2) + np.power(cpz, 2))
-    return (cpx / mag, cpy / mag, cpz / mag)
-
-
-# stlwriter is a simple class for writing binary STL meshes.
-# Class instances are constructed with a predicted face count.
-# The output file header is overwritten upon completion with
-# the actual face count.
-class stlwriter():
-
-    # path: output binary stl file path
-    # facet_count: predicted number of facets
-    def __init__(self, path, facet_count=0):
-        self.f = open(path, 'wb')
-
-        # track number of facets actually written
-        self.written = 0
-
-        # write binary stl header with predicted facet count
-        self.f.write(b'\0' * 80)
-        # (facet count is little endian 4 byte unsigned int)
-        self.f.write(pack('<I', facet_count))
-
-    # t: ((ax, ay, az), (bx, by, bz), (cx, cy, cz))
-    def add_facet(self, t):
-        # facet normals and vectors are little endian 4 byte float triplets
-        # strictly speaking, we don't need to compute NormalVector,
-        # as other tools could be used to update the output mesh.
-        self.f.write(pack('<3f', *NormalVector(t)))
-        for vertex in t:
-            self.f.write(pack('<3f', *vertex))
-        # facet records conclude with two null bytes (unused "attributes")
-        self.f.write(b'\0\0')
-        self.written += 1
-
-    def done(self):
-        # update final facet count in header before closing file
-        self.f.seek(80)
-        self.f.write(pack('<I', self.written))
-        self.f.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.done()
-
-
-# float32 wraps np.float32 but returns 0 for infinity numbers, which we often
-# get from np.float32 for very small numbers
-# TODO this is jank
-def float32(x):
-    f = np.float32(x)
-    if np.isinf(f):
-        return np.float32(0)
-    return f
 
 
 if __name__ == "__main__":
@@ -288,9 +200,11 @@ if __name__ == "__main__":
     # output mesh dimensions are one row and column less than raster window
     mw = pixels.shape[1] - 1  # width X
     mh = pixels.shape[0] - 1  # height Y
-    facetcount = mw * mh * 2
+    est_triangles = mw * mh * 2
+    est_space = est_triangles * 50
     logging.info(f"mw,mh = ({mw},{mh})")
-    logging.info(f"stl facets = {facetcount}")
+    logging.info(f"estimated faces: {est_triangles}")
+    logging.info(f"estimated max size: {humanize.naturalsize(est_space)}")
 
     xmin, ymin, zmin = 0, 0, 0
 
@@ -301,63 +215,72 @@ if __name__ == "__main__":
     logging.info(f"xscale: {xscale} yscale: {yscale} zscale: {zscale}")
 
     # I basically store this whole routine from phstl
-    with stlwriter(args.STL, facetcount) as mesh:
-        for y in range(mh):
-            progress = (y / mh) * 100
-            print(f"Writing STL: {progress:.2f}%", end='\r')
+    triangles = []
+    for y in range(mh):
+        progress = (y / mh) * 100
+        print(f"== generating mesh: {progress:.2f}%", end='\r')
 
-            for x in range(mw):
+        for x in range(mw):
 
-                # Elevation values of this pixel (a) and its neighbors (b, c, and d).
-                av = pixels[y][x]
-                bv = pixels[y + 1][x]
-                cv = pixels[y][x + 1]
-                dv = pixels[y + 1][x + 1]
+            # Elevation values of this pixel (a) and its neighbors (b, c, and d).
+            av = pixels[y][x]
+            bv = pixels[y + 1][x]
+            cv = pixels[y][x + 1]
+            dv = pixels[y + 1][x + 1]
 
-                # Apply transforms to obtain output mesh coordinates of the
-                # four corners composed of raster points a (x, y), b, c,
-                # and d (x + 1, y + 1):
-                #
-                # a-c   a-c     c
-                # |/| = |/  +  /|
-                # b-d   b     b-d
+            # Apply transforms to obtain output mesh coordinates of the
+            # four corners composed of raster points a (x, y), b, c,
+            # and d (x + 1, y + 1):
+            #
+            # a-c   a-c     c
+            # |/| = |/  +  /|
+            # b-d   b     b-d
 
-                # Points b and c are required for both facets, so if either
-                # are unavailable, we can skip this pixel altogether.
-                if skip(bv) or skip(cv):
-                    continue
+            # Points b and c are required for both facets, so if either
+            # are unavailable, we can skip this pixel altogether.
+            if skip(bv) or skip(cv):
+                continue
 
-                # TODO for each axis I am only considering one aspect of the Affine transformation,
-                # but that probably wont work out for non rectangles. See phstl
-                b = (
-                    float32(xscale * (xmin + x)),
-                    float32(yscale * (ymin + y + 1)),
-                    float32(zscale * (float(bv) - zmin))
+            # TODO for each axis I am only considering one aspect of the Affine transformation,
+            # but that probably wont work out for non rectangles. See phstl
+            b = (
+                np.float32(xscale * (xmin + x)),
+                np.float32(yscale * (ymin + y + 1)),
+                np.float32(zscale * (float(bv) - zmin))
+            )
+
+            c = (
+                np.float32(xscale * (xmin + x + 1)),
+                np.float32(yscale * (ymin + y)),
+                np.float32(zscale * (float(cv) - zmin))
+            )
+
+            if not skip(av):
+                a = (
+                    np.float32(xscale * (xmin + x)),
+                    np.float32(yscale * (ymin + y)),
+                    np.float32(zscale * (float(av) - zmin))
                 )
+                triangles.append((a, b, c))
 
-                c = (
-                    float32(xscale * (xmin + x + 1)),
-                    float32(yscale * (ymin + y)),
-                    float32(zscale * (float(cv) - zmin))
+            if not skip(dv):
+                d = (
+                    np.float32(xscale * (xmin + x + 1)),
+                    np.float32(yscale * (ymin + y + 1)),
+                    np.float32(zscale * (float(dv) - zmin))
                 )
+                triangles.append((d, c, b))
 
-                if not skip(av):
-                    a = (
-                        float32(xscale * (xmin + x)),
-                        float32(yscale * (ymin + y)),
-                        float32(zscale * (float(av) - zmin))
-                    )
-                    mesh.add_facet((a, b, c))
+    logging.info(f"generated mesh with faces: {len(triangles)}")
 
-                if not skip(dv):
-                    d = (
-                        float32(xscale * (xmin + x + 1)),
-                        float32(yscale * (ymin + y + 1)),
-                        float32(zscale * (float(dv) - zmin))
-                    )
-                    mesh.add_facet((d, c, b))
+    logging.info(f"writing STL...")
+    stl = mesh.Mesh(np.zeros(len(triangles), dtype=mesh.Mesh.dtype), remove_empty_areas=False)
+    stl.vectors = triangles
+    stl.save(args.STL, update_normals=True)  # TODO not sure why I am updating normals, but ok
 
     # show it
     if args.show:
         pyplot.imshow(src.read(1), cmap='pink')
         pyplot.show()
+
+    logging.info("finished!")

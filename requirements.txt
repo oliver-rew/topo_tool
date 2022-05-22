@@ -3,3 +3,4 @@ rasterio==1.3a3
 matplotlib
 GDAL
 numpy
+humanize

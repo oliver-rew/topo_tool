@@ -274,7 +274,7 @@ if __name__ == "__main__":
         if not crs.is_projected or crs.linear_units == "unknown":
             warning = (f"CRS is not projected or units are unknown. While possible to complete, the results" +
                        f" will likely be undesirable. It is suggested you project the dataset with the" +
-                       f" '-r|--reproject' flag. example: '-r EPSG:3395'. This check can be overridden with" +
+                       f" '-p|--reproject' flag. example: '-p EPSG:3395'. This check can be overridden with" +
                        f"the '-f|--force' flag")
             if args.force:
                 logging.warning(warning)

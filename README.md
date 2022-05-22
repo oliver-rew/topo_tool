@@ -1,7 +1,7 @@
 # topo_tool
 
 A simple tool to convert GeoTIFF elevation files to STL mesh. Based HEAVILY on `phstl` (linked below). I even have my
-own fork of `phstl` that fixes some of the issues (also linked below). Instead of using GDAL directly like phstl, this
+own fork of `phstl` that fixes some issues (also linked below). Instead of using GDAL directly like `phstl`, this
 tool uses `rasterio`.
 
 https://github.com/anoved/phstl

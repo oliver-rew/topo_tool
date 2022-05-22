@@ -1,0 +1,5 @@
+# TODO versions?
+rasterio
+matplotlib
+GDAL
+numpy

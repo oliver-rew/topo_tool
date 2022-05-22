@@ -41,6 +41,7 @@ $ python3.9 topo.py USGS_one_meter_x58y451_NY_CMPG_2013.tiff nyc.stl -z 2 -p EPS
 ## TODO
 
 - do final raster to STL conversion in parallel
-- use a real STL library
+- use a file backed list for very large meshes
+- use a geoJson library
 - For cropping, instead of projecting to WGS84 for operation, convert the provided coordinates to the CRS of the source
   dataset and crop after any projection

@@ -215,7 +215,7 @@ if __name__ == "__main__":
     logging.info(f"xscale: {xscale} yscale: {yscale} zscale: {zscale}")
 
     # I basically store this whole routine from phstl
-    triangles = []
+    faces = []
     for y in range(mh):
         progress = (y / mh) * 100
         print(f"== generating mesh: {progress:.2f}%", end='\r')
@@ -261,7 +261,7 @@ if __name__ == "__main__":
                     np.float32(yscale * (ymin + y)),
                     np.float32(zscale * (float(av) - zmin))
                 )
-                triangles.append((a, b, c))
+                faces.append((a, b, c))
 
             if not skip(dv):
                 d = (
@@ -269,13 +269,14 @@ if __name__ == "__main__":
                     np.float32(yscale * (ymin + y + 1)),
                     np.float32(zscale * (float(dv) - zmin))
                 )
-                triangles.append((d, c, b))
+                faces.append((d, c, b))
 
-    logging.info(f"generated mesh with faces: {len(triangles)}")
+    logging.info(f"generated mesh has {len(faces)} faces")
 
     logging.info(f"writing STL...")
-    stl = mesh.Mesh(np.zeros(len(triangles), dtype=mesh.Mesh.dtype), remove_empty_areas=False)
-    stl.vectors = triangles
+    # instantiate mesh based on the number of faces we generates
+    stl = mesh.Mesh(np.zeros(len(faces), dtype=mesh.Mesh.dtype), remove_empty_areas=False)
+    stl.vectors = faces
     stl.save(args.STL, update_normals=True)  # TODO not sure why I am updating normals, but ok
 
     # show it

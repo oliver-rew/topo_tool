@@ -7,9 +7,13 @@ https://github.com/oliver-rew/phstl
 First, get some elevation geotiffs from the national map downloader.
 https://apps.nationalmap.gov/downloader/
 
-- convert to STL with crop, reproject, and 2x Z scaling
+- convert to STL with: 
+  - crop to coordinates
+  - reproject to EPSG:3395
+  - Resample 0.125 (downsample by 8x)
+  - 2x Z scaling
 ```
-$ python3.9 topo.py USGS_one_meter_x58y451_NY_CMPG_2013.tiff nyc.stl -r EPSG:3395 -z 2 -c 40.700836 -74.020380 40.730494 -73.971060
+$ python3.9 topo.py USGS_one_meter_x58y451_NY_CMPG_2013.tiff nyc.stl -z 2 -p EPSG:3395 -s 0.125 -c 40.700836 -74.020380 40.730494 -73.971060
 ```
 
 ## TODO
